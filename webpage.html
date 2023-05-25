@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>ARCAR Debug Interface</title>
+	<!--<script type="module" src="./webpage.js"></script>-->
+	<style>
+	@keyframes flash {
+		from {background-color: #A0FFA0;}
+		to {background-color: #FFFFFF;}
+	}
+	</style>
+</head>
+<body>
+	
+	<div id="buttonContainer">
+	<button onclick='playbackControl("pause");'>Pause</button>
+	<button onclick='playbackControl("rewind");'>Rewind</button>
+	<button onclick='playbackControl("play");'>Play</button>
+	<button onclick='playbackControl("+1");'>Next</button>
+	<button onclick='playbackControl("-1");'>Prev</button>
+	<button onclick='playbackControl("+10");'>+10</button>
+	<button onclick='playbackControl("-10");'>-10</button>
+	<button onclick='playbackControl("+100");'>+100</button>
+	<button onclick='playbackControl("-100");'>-100</button>
+	<button onclick='playbackControl("rand");'>Random</button>
+	<button onclick='playbackControl("reload");'>Reload</button>
+	<input type="text" id="jumpTarget">
+	<button onclick='pbcJump();'>JUMP</button>
+	</div>
+	
+	<div id="info1"></div>
+	<div id="info2"></div>
+	<div id="info3"></div>
+
+	<div id="imgsContainer" style="display:flex;flex-direction:row;flex-wrap:wrap;"></div>
+	<div style="display:none;">
+	<canvas id="pc_monodepth"> </canvas>
+	<canvas id="pc_opencv"> </canvas>
+	<canvas id="pc_psmnet"> </canvas>
+	<canvas id="pc_igev"> </canvas>
+	<canvas id="gps_canvas" width="480" height="270"> </canvas>
+	<div>
+	
+	<script>
+		function playbackControl(type){
+			var xhr=new XMLHttpRequest();
+			xhr.open("GET","/playbackControl?type="+encodeURIComponent(type));
+			xhr.send();
+		}
+		function pbcJump(){
+			var val=jumpTarget.value;
+			console.log("Jump req to "+val)
+			var xhr=new XMLHttpRequest();
+			xhr.open("GET","/playbackControl?jumpTo="+encodeURIComponent(val));
+			xhr.send();
+		}
+	</script>
+	
+	<script type="module">
+		var webpageConfig= $$$PYTHON REPLACE: WEBPAGE_CONFIG$$$;
+		import {setupPointCloudRenderer} from "./webpage.js";
+		// Periodically fetch data form server
+		
+
+		var imgDOMs={};
+		function addCell(e,s){
+			var outerDiv=document.createElement("div");
+			outerDiv.style="width:fit-content;display:flex; flex-direction: column; border:1px solid;"
+			imgsContainer.appendChild(outerDiv);
+			
+			var span=document.createElement("span");
+			var tn=document.createTextNode(s);
+			span.appendChild(tn);
+			outerDiv.appendChild(span);
+			outerDiv.appendChild(e);
+		}
+		function addImage(key,desc){
+			var img=document.createElement("img");
+			img.style="width:480px;height:270px;";
+			addCell(img,desc)
+			imgDOMs[key]=img;
+		}
+		function addBr(){
+			var outerDiv=document.createElement("div");
+			outerDiv.style="width:100%;";
+			imgsContainer.appendChild(outerDiv);
+		}
+		
+		addImage("raw","Raw Image (L)");
+		addImage("dif","Stereo Difference");
+		addImage("str","Stereo Image (R)");
+		addBr();
+		if (webpageConfig["depthvisual"]){
+			if (webpageConfig["md"])   addImage("dmd","MonoDepth Monocular Depth");
+			if (webpageConfig["ocv"])  addImage("dcv","OpenCV Stereo Depth");
+			if (webpageConfig["psm"])  addImage("dpsm","PSMNet Stereo Depth");
+			if (webpageConfig["igev"]) addImage("digev","IGEV Stereo Depth");
+			addBr();
+		}
+		if (webpageConfig["pointcloud"]){
+			if (webpageConfig["md"])  
+				addCell(document.getElementById("pc_monodepth"),
+					"Point Cloud (MonoDepth)");
+			if (webpageConfig["ocv"]) 
+				addCell(document.getElementById("pc_opencv"),
+					"Point Cloud (OpenCV)");
+			if (webpageConfig["psm"]) 
+				addCell(document.getElementById("pc_psmnet"),
+					"Point Cloud (PSMNet)");
+			if (webpageConfig["igev"]) 
+				addCell(document.getElementById("pc_igev"),
+					"Point Cloud (IGEV)");
+			addBr();
+		}
+		addImage("seg","Segmentation");
+		addImage("com","Seg+Depth");
+		//addImage("wblur","Blurred Depth");
+		if (webpageConfig["gps"]) {
+			addCell(document.getElementById("gps_canvas"),
+				"GPS");
+			var cvs=gps_canvas;
+			var cctx=cvs.getContext("2d");
+			
+			cctx.fillStyle =   "rgba(0,0,200,0.5)";
+			cctx.strokeStyle = "rgba(200,0,200,0.5)";
+			cctx.beginPath()
+			cctx.moveTo(100,100);
+			cctx.lineTo(200,200);
+			cctx.lineTo(200,100);
+			cctx.stroke();
+		}
+		addBr();
+		if (webpageConfig["wallvisual"]){
+			addImage("wmpc0","Wall[0] Pre-Choke Mask");
+			addImage("wmpc1","Wall[1] Pre-Choke Mask");
+			addImage("wmpc2","Wall[2] Pre-Choke Mask");
+			addImage("wmpc3","Wall[3] Pre-Choke Mask");
+			addBr();
+			addImage("werr0","Wall[0] Error");
+			addImage("werr1","Wall[1] Error");
+			addImage("werr2","Wall[2] Error");
+			addImage("werr3","Wall[3] Error");
+			addBr();
+			addImage("wmsk0","Wall[0] Mask");
+			addImage("wmsk1","Wall[1] Mask");
+			addImage("wmsk2","Wall[2] Mask");
+			addImage("wmsk3","Wall[3] Mask");
+		}
+		
+		var pointCloudCanvases=[];
+		if (webpageConfig["md"])   pointCloudCanvases.push({"canvas":pc_monodepth,"json":"/pc_monodepth.json"});
+		if (webpageConfig["ocv"])  pointCloudCanvases.push({"canvas":pc_opencv,"json":"/pc_opencv.json"});
+		if (webpageConfig["psm"])  pointCloudCanvases.push({"canvas":pc_psmnet,"json":"/pc_psmnet.json"});
+		if (webpageConfig["igev"]) pointCloudCanvases.push({"canvas":pc_igev,"json":"/pc_igev.json"});
+			
+			
+		for (var i in pointCloudCanvases){
+			pointCloudCanvases[i]["upFunc"]=setupPointCloudRenderer(
+				pointCloudCanvases[i]["canvas"]);
+		}
+		
+		function request(location,succ,fail){
+			var xhr=new XMLHttpRequest();
+			xhr.timeout=1000;
+			xhr.open("GET",location);
+			xhr.addEventListener("load",function(e){
+				if (xhr.status==200) succ(xhr.responseText);
+				else fail(xhr.status);
+			});
+			xhr.addEventListener("error",function(e){
+				fail(e);
+			});
+			xhr.send();
+		}
+		function update_all(){
+			
+			
+			for (var k in imgDOMs){
+				/*
+				//imgDOMs[k].onload=function(){console.log("Img"+k+"Loaded");};
+				imgDOMs[k].onload=function(){
+					textDOMs[k].style.animation ="flash 0.5s ease-in";
+				};*/
+				//console.log(imgDOMs[k]);
+				imgDOMs[k].src=k+".jpg?forcereload="+(new Date()).getTime();
+			}
+			
+			if (webpageConfig["pointcloud"]){
+				for (var i in pointCloudCanvases){
+					let o=pointCloudCanvases[i];
+					request(
+						o["json"],
+						function(resp){
+							//console.log("Request succ:"+o["json"]);
+							o["upFunc"](JSON.parse(resp));
+						},
+						function(resp){
+							//console.log("Request fail:"+o["json"]);
+							o["upFunc"]([]); //Clear points
+						}
+					)
+				}
+			}
+			
+			if (webpageConfig["gps"]){
+				request(
+					"/gpsvis",
+					function(resp){
+						gpsVisUpdate(JSON.parse(resp));
+					},
+					function(resp){
+						cctx.clearRect(0,0,cvs.width,cvs.height);
+					}
+				)
+				
+			}
+		}
+		
+		var px_per_meter=1.0;
+		var grid_meter=50;
+		var arrow_length_meters=50;
+		var buildRectSize=10;
+		function toCvsCoords(xy){
+			let x=cvs.width/2+xy[0]*px_per_meter;
+			let y=cvs.height/2-xy[1]*px_per_meter;
+			return [x,y];
+		}
+		function gpsVisUpdate(data){
+			cctx.clearRect(0,0,cvs.width,cvs.height);
+			var cOrigin=toCvsCoords([0,0]);
+			
+			var vel=data["velocity"];
+			var velScaled=[vel[0]*arrow_length_meters,vel[1]*arrow_length_meters];
+			var cVel=toCvsCoords(velScaled);
+			
+			var look=data["looking"];
+			var lookScaled=[look[0]*arrow_length_meters,look[1]*arrow_length_meters];
+			var cLook=toCvsCoords(lookScaled);
+			
+			cctx.strokeStyle = "rgba(200,0,0,1.0)";
+			cctx.beginPath()
+			cctx.moveTo(cOrigin[0],cOrigin[1]);
+			cctx.lineTo(cVel[0],cVel[1]);
+			cctx.stroke();
+			
+			cctx.strokeStyle = "rgba(0,200,0,1.0)";
+			cctx.beginPath()
+			cctx.moveTo(cOrigin[0],cOrigin[1]);
+			cctx.lineTo(cLook[0],cLook[1]);
+			cctx.stroke();
+			
+			var pos=data["position"];
+			var nearestX=Math.round(pos[0]/grid_meter)*grid_meter;
+			var x=toCvsCoords([nearestX-pos[0],0])[0];
+			while (x>0) x-=px_per_meter*grid_meter;
+			do {
+				x+=px_per_meter*grid_meter;
+				cctx.strokeStyle = "rgba(0,0,0,0.3)";
+				cctx.beginPath()
+				cctx.moveTo(x,0);
+				cctx.lineTo(x,cvs.height);
+				cctx.stroke();
+			} while (x<cvs.width);
+			
+			var nearestY=Math.round(pos[1]/grid_meter)*grid_meter;
+			var y=toCvsCoords([0,nearestY-pos[1]])[1];
+			while (y>0) y-=px_per_meter*grid_meter;
+			do {
+				y+=px_per_meter*grid_meter;
+				cctx.strokeStyle = "rgba(0,0,0,0.3)";
+				cctx.beginPath()
+				cctx.moveTo(0,y);
+				cctx.lineTo(cvs.width,y);
+				cctx.stroke();
+			} while (y<cvs.width);
+			
+			for (var i=0;i<data["buildings"].length;i++){
+				let b=data["buildings"][i];
+				let cvsCoords=toCvsCoords([b["relX"],b["relY"]]);
+				//console.log(b);
+				//console.log(cvsCoords);
+				if (i==0) cctx.fillStyle = "rgba(0,0,200,1.0)";
+				else cctx.fillStyle = "rgba(0,0,0,1.0)";
+				cctx.fillRect(
+					cvsCoords[0]-buildRectSize/2, 
+					cvsCoords[1]-buildRectSize/2, 
+					buildRectSize, buildRectSize);
+				cctx.font="16px serif";
+				cctx.fillText(b["name"],cvsCoords[0],cvsCoords[1]);
+			}
+		}
+		
+		
+		
+		var last_update_flag;
+		function updateCheck(){
+			request(
+				"/update_flag",
+				function(resp){
+					if (resp != last_update_flag){
+						console.log("Updating images "+resp);
+						last_update_flag=resp;
+						update_all();
+					}
+				},
+				function(e){}
+			);
+		}
+		setInterval(updateCheck,50);
+		
+		function updateInfoboxes(){
+			request(
+				"/info1",
+				function(resp){info1.innerHTML=resp;},
+				function(e){}
+			);
+			request(
+				"/info2",
+				function(resp){info2.innerHTML=resp;},
+				function(e){}
+			);
+			request(
+				"/info3",
+				function(resp){info3.innerHTML=resp;},
+				function(e){}
+			);
+		}
+		setInterval(updateInfoboxes,100);
+		
+		
+		
+	</script>
+	
+	
+	</body>
+</html>
